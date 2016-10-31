@@ -98,9 +98,11 @@ def parse_rls_title(item):
             log("MOVIE Parsed Item: %s" % (item,))
 
 
-def clear_store():
+def clear_store(notify_success=True):
     store.delete("%")
-    notify(32004)
+
+    if notify_success:
+        notify(32004)
 
 
 def get_store_key(prefix="", str=""):
@@ -135,35 +137,40 @@ class SubscenterHelper:
         search_string = re.split(r'\s\(\w+\)$', item["tvshow"])[0] if item["tvshow"] else item["title"]
         user_token = self.get_user_token()
 
-        query = {"q": search_string.encode("utf-8"), "user": user_token["user"], "token": user_token["token"]}
-        if item["tvshow"]:
-            query["type"] = "series"
-            query["season"] = item["season"]
-            query["episode"] = item["episode"]
-        else:
-            query["type"] = "movies"
-            query["year_start"] = int(item["year"])-1
-            query["year_end"] = int(item["year"])
+        if user_token:
+            query = {"q": search_string.encode("utf-8"), "user": user_token["user"], "token": user_token["token"]}
+            if item["tvshow"]:
+                query["type"] = "series"
+                query["season"] = item["season"]
+                query["episode"] = item["episode"]
+            else:
+                query["type"] = "movies"
+                if item["year"]:
+                    query["year_start"] = int(item["year"]) - 1
+                    query["year_end"] = int(item["year"])
 
-        search_result = self.urlHandler.request(self.BASE_URL + "search/", query)
-
-        if search_result is not None and search_result["result"] == "failed":
-            # Update cached token
-            user_token = self.get_user_token(True)
-            query["token"] = user_token["token"]
             search_result = self.urlHandler.request(self.BASE_URL + "search/", query)
 
-        if search_result is not None and search_result["result"] == "failed":
+            if search_result is not None and search_result["result"] == "failed":
+                # Update cached token
+                user_token = self.get_user_token(True)
+                query["token"] = user_token["token"]
+                search_result = self.urlHandler.request(self.BASE_URL + "search/", query)
+
+            if search_result is not None and search_result["result"] == "failed":
+                notify(32009)
+                return results
+
+            log("Results: %s" % search_result)
+
+            if search_result is None or search_result["result"] != "success" or search_result["count"] < 1:
+                return results  # return empty set
+
+            results = self._filter_results(search_result["data"], search_string, item)
+            log("Filtered: %s" % results)
+
+        else:
             notify(32009)
-            return results
-
-        log("Results: %s" % search_result)
-
-        if search_result is None or search_result["result"] != "success" or search_result["count"] < 1:
-            return results  # return empty set
-
-        results = self._filter_results(search_result["data"], search_string, item)
-        log("Filtered: %s" % results)
 
         return results
 
@@ -257,7 +264,7 @@ class SubscenterHelper:
             shutil.rmtree(__temp__)
         xbmcvfs.mkdirs(__temp__)
 
-        query = {"v": filename,
+        query = {"v": ''.join(hex(ord(chr))[2:] for chr in filename),
                  "key": key,
                  "sub_id": id}
 
@@ -274,14 +281,14 @@ class SubscenterHelper:
 
         xbmc.executebuiltin(('XBMC.Extract("%s","%s")' % (zip_filename, __temp__,)).encode('utf-8'), True)
 
-    def login(self, isFromSettings=False):
+    def login(self, notify_success=False):
         email = __addon__.getSetting("Email")
         password = __addon__.getSetting("Password")
         post_data = {'username': email, 'password': password}
         content = self.urlHandler.request(self.BASE_URL + "login/", post_data)
 
         if content['result'] == 'success':
-            if isFromSettings:
+            if notify_success:
                 notify(32010)
 
             del content["result"]
@@ -299,7 +306,8 @@ class SubscenterHelper:
             results = json.loads(results)
         else:
             results = self.login()
-            store.set('credentials', json.dumps(results))
+            if results:
+                store.set('credentials', json.dumps(results))
 
         return results
 

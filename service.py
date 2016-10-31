@@ -8,6 +8,7 @@ import xbmcvfs
 import xbmcaddon
 import xbmcgui
 import xbmcplugin
+from requests import post
 
 
 __addon__ = xbmcaddon.Addon()
@@ -52,7 +53,7 @@ def search(item):
             xbmcplugin.addDirectoryItem(handle=int(sys.argv[1]), url=url, listitem=listitem, isFolder=False)
 
 
-def download(id, language, key, filename, stack=False):
+def download(id, language, key, filename):
     subtitle_list = []
     exts = [".srt", ".sub"]
 
@@ -91,6 +92,23 @@ def get_params(string=""):
 
     return param
 
+def mirror_sub(id, filename, sub_file):
+    values = {}
+    values['id'] = id
+    values['versioname'] = filename
+    values['source'] = 'subscenter'
+    values['year'] = xbmc.getInfoLabel("VideoPlayer.Year")
+    values['season'] = str(xbmc.getInfoLabel("VideoPlayer.Season"))
+    values['episode'] = str(xbmc.getInfoLabel("VideoPlayer.Episode"))
+    values['imdb'] = str(xbmc.getInfoLabel("VideoPlayer.IMDBNumber"))
+    values['tvshow'] = normalizeString(xbmc.getInfoLabel("VideoPlayer.TVshowtitle"))
+    values['title'] = normalizeString(xbmc.getInfoLabel("VideoPlayer.OriginalTitle"))
+    values['file_original_path'] = urllib.unquote(unicode(xbmc.Player().getPlayingFile(), 'utf-8'))
+    url = 'http://subs.thewiz.info/send.php'
+    try:
+        post(url, files={'sub': open(sub_file, 'rb')}, data=values)
+    except:
+        pass
 
 params = get_params()
 
@@ -102,17 +120,33 @@ if params['action'] in ['search', 'manualsearch']:
         params['searchstring'] = urllib.unquote(params['searchstring'])
 
     item = {}
-    item['temp'] = False
-    item['rar'] = False
-    item['year'] = xbmc.getInfoLabel("VideoPlayer.Year")  # Year
-    item['season'] = str(xbmc.getInfoLabel("VideoPlayer.Season"))  # Season
-    item['episode'] = str(xbmc.getInfoLabel("VideoPlayer.Episode"))  # Episode
-    item['tvshow'] = normalizeString(xbmc.getInfoLabel("VideoPlayer.TVshowtitle"))  # Show
-    item['title'] = normalizeString(xbmc.getInfoLabel("VideoPlayer.OriginalTitle"))  # try to get original title
-    item['file_original_path'] = urllib.unquote(unicode(xbmc.Player().getPlayingFile(), 'utf-8'))  # Full path of a playing file
-    item['3let_language'] = []
-    item['preferredlanguage'] = unicode(urllib.unquote(params.get('preferredlanguage', '')), 'utf-8')
-    item['preferredlanguage'] = xbmc.convertLanguage(item['preferredlanguage'], xbmc.ISO_639_2)
+    
+    if xbmc.Player().isPlaying():
+        item['temp'] = False
+        item['rar'] = False
+        item['year'] = xbmc.getInfoLabel("VideoPlayer.Year")  # Year
+        item['season'] = str(xbmc.getInfoLabel("VideoPlayer.Season"))  # Season
+        item['episode'] = str(xbmc.getInfoLabel("VideoPlayer.Episode"))  # Episode
+        item['tvshow'] = normalizeString(xbmc.getInfoLabel("VideoPlayer.TVshowtitle"))  # Show
+        item['title'] = normalizeString(xbmc.getInfoLabel("VideoPlayer.OriginalTitle"))  # try to get original title
+        item['file_original_path'] = urllib.unquote(unicode(xbmc.Player().getPlayingFile(), 'utf-8'))  # Full path of a playing file
+        item['3let_language'] = []
+        item['preferredlanguage'] = unicode(urllib.unquote(params.get('preferredlanguage', '')), 'utf-8')
+        item['preferredlanguage'] = xbmc.convertLanguage(item['preferredlanguage'], xbmc.ISO_639_2)
+
+    else:
+        item['temp'] = False
+        item['rar'] = False
+        item['year'] = ""
+        item['season'] = ""
+        item['episode'] = ""
+        item['tvshow'] = ""
+        item['title'] = "Search For..."  # Needed to avoid showing previous search result.
+        item['file_original_path'] = ""
+        item['3let_language'] = []
+        item['preferredlanguage'] = unicode(urllib.unquote(params.get('preferredlanguage', '')), 'utf-8')
+        item['preferredlanguage'] = xbmc.convertLanguage(item['preferredlanguage'], xbmc.ISO_639_2)
+
 
     if item['title'] == "":
         log("VideoPlayer.OriginalTitle not found")
@@ -156,12 +190,16 @@ elif params['action'] == 'download':
     subs = download(params["id"], params["language"], params["link"], params["filename"])
     ## we can return more than one subtitle for multi CD versions, for now we are still working out how to handle that in XBMC core
     for sub in subs:
+        if params["language"] == 'he' and xbmc.Player().isPlaying():
+            mirror_sub(params["id"], params["filename"], sub)
         listitem = xbmcgui.ListItem(label=sub)
         xbmcplugin.addDirectoryItem(handle=int(sys.argv[1]), url=sub, listitem=listitem, isFolder=False)
+
 elif params['action'] == 'clear_store':
     clear_store()
 
 elif params['action'] == 'login':
+    clear_store(False)
     helper = SubscenterHelper()
     helper.login(True)
     __addon__.openSettings()
